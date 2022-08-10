@@ -11,6 +11,7 @@ using RestEase;
 using Azure.Data.Tables;
 using Azure.Storage;
 using Azure;
+using Newtonsoft.Json.Linq;
 
 namespace YourWeatherInfo_Functions
 {
@@ -61,11 +62,15 @@ namespace YourWeatherInfo_Functions
     }
 
     // C# record type for WeatherRecord in the table
-    public record WeatherRecord : ITableEntity
+    public class WeatherRecord : ITableEntity
     {
         public string PartitionKey { get; set; } = default!;
         public string RowKey { get; set; } = default!;
-        public WeatherData WeatherData { get; init; }
+
+        public string WeatherRecordJson { get; set; } = default!;
+        public DateTimeOffset? Timestamp { get; set; }
+        public ETag ETag { get; set; }
+        //public WeatherData WeatherData { get; init; }
     }
 
     public static class WeatherRequest
@@ -118,16 +123,15 @@ namespace YourWeatherInfo_Functions
             //Create WeatherRecords table if it does not exist
             await tableClient.CreateIfNotExistsAsync();
 
-            //
-            DateTime val = DateTime.Now;
-            DateTimeOffset value = new DateTimeOffset(val);
-
             var weatherRecord = new WeatherRecord()
             {
                 PartitionKey = zipcode,
-                RowKey = value.ToUnixTimeMilliseconds().ToString(),
-                WeatherData = weatherData
+                RowKey = zipcode,
+                WeatherRecordJson = JObject.FromObject(weatherData).ToString()
             };
+
+            //Get JSON back to weather data
+            var WeatherJson = JObject.Parse(weatherRecord.WeatherRecordJson);
 
             //Add weatherRecord to the table
             await tableClient.AddEntityAsync<WeatherRecord>(weatherRecord);

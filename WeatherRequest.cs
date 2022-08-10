@@ -10,6 +10,7 @@ using Newtonsoft.Json;
 using RestEase;
 using Azure.Data.Tables;
 using Azure.Storage;
+using Azure;
 
 namespace YourWeatherInfo_Functions
 {
@@ -49,6 +50,7 @@ namespace YourWeatherInfo_Functions
     }
     public class Condition { }
 
+
     // Defined an interface representing the API
     //[Header("User-Agent", "RestEase")]
     public interface IWeatherApi
@@ -56,6 +58,14 @@ namespace YourWeatherInfo_Functions
         // The [Get] attribute marks this method as a GET request
         [Get("v1/current.json?key=5e8bd5b4258b4f05a6111158220707&q={zipcode}&aqi=no")]
         Task<WeatherData> GetWeatherDataAsync([Path] string zipcode);
+    }
+
+    // C# record type for WeatherRecord in the table
+    public record WeatherRecord : ITableEntity
+    {
+        public string PartitionKey { get; set; } = default!;
+        public string RowKey { get; set; } = default!;
+        public WeatherData WeatherData { get; init; }
     }
 
     public static class WeatherRequest
@@ -83,41 +93,44 @@ namespace YourWeatherInfo_Functions
 
             // Now we can simply call methods on it
             // Normally you'd await the request, but this is a console app
-            WeatherData weatherData = api.GetWeatherDataAsync(zipcode).Result;
+            WeatherData weatherData = await api.GetWeatherDataAsync(zipcode);
             Console.WriteLine(weatherData);
             Console.WriteLine($"Name: {weatherData.Location.Name}. Location: {zipcode}.\n" +
                               $"Temperature: {weatherData.Current.Temp_f}. Wind Speed: {weatherData.Current.Wind_mph} MPH. Wind Direction: {weatherData.Current.Wind_dir}.\n" +
                               $"Cloud Coverage: {weatherData.Current.Cloud}. Humidity {weatherData.Current.Humdity}.");
 
-            // With connection string
-            var tableclient = new TableClient(
-                "DefaultEndpointsProtocol=https;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;TableEndpoint=https://127.0.0.1:10002/devstoreaccount1;", "WeatherTable"
-              );
+            string endpointProtocol = Environment.GetEnvironmentVariable("DefaultEndpointsProtocol");
+            string accountName = Environment.GetEnvironmentVariable("AccountName");
+            string accountKey = Environment.GetEnvironmentVariable("AccountKey");
+            string tableEndpoint = Environment.GetEnvironmentVariable("TableEndpoint");
 
-            // With account name and key
-            var tableclient2 = new TableClient(
-                new Uri("https://127.0.0.1:10002/devstoreaccount1/WeatherTable"),
-                "WeatherTable",
-                new TableSharedKeyCredential("devstoreaccount1", "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==")
-              );
+            string connectionString = "DefaultEndpointsProtocol=" + endpointProtocol + ";AccountName=" + accountName + ";AccountKey=" + accountKey + ";TableEndpoint=" + tableEndpoint + ";";
 
+            TableServiceClient tableServiceClient = new TableServiceClient(
+                connectionString
+                );
+
+            // New instance of TableClient class referencing the server-side table
+            TableClient tableClient = tableServiceClient.GetTableClient(
+                tableName: "WeatherRecords"
+            );
+
+            //Create WeatherRecords table if it does not exist
+            await tableClient.CreateIfNotExistsAsync();
+
+            //
             DateTime val = DateTime.Now;
-
             DateTimeOffset value = new DateTimeOffset(val);
-            value.ToUnixTimeMilliseconds().ToString(); //ROWKEY Zipcode PRIMARYKEY
 
-            //HTTP Connection Strings
-            string connectionString = "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/" +
-                "KBHBeksoGMGw==;BlobEndpoint=http://127.0.0.1:10000/devstoreaccount1;QueueEndpoint=http://127.0.0.1:10001/devstoreaccount1;TableEndpoint=http://127.0.0.1:10002/devstoreaccount1;";
-            Console.WriteLine("connection string: " + connectionString);
+            var weatherRecord = new WeatherRecord()
+            {
+                PartitionKey = zipcode,
+                RowKey = value.ToUnixTimeMilliseconds().ToString(),
+                WeatherData = weatherData
+            };
 
-            string connectionTable = "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/" +
-                "KBHBeksoGMGw==;TableEndpoint=http://127.0.0.1:10002/devstoreaccount1;";
-            Console.WriteLine("connection string: " + connectionTable);
-
-            //zipcode weatherData
-            await tableclient.CreateIfNotExistsAsync();
-            //await tableclient.
+            //Add weatherRecord to the table
+            await tableClient.AddEntityAsync<WeatherRecord>(weatherRecord);
 
 
             return new OkObjectResult(weatherData);

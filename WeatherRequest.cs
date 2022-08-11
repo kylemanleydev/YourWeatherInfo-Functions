@@ -126,7 +126,7 @@ namespace YourWeatherInfo_Functions
             var weatherRecord = new WeatherRecord()
             {
                 PartitionKey = zipcode,
-                RowKey = zipcode,
+                RowKey = "",
                 WeatherRecordJson = JObject.FromObject(weatherData).ToString()
             };
 

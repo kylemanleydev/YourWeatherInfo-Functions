@@ -6,26 +6,18 @@ using Microsoft.Azure.WebJobs;
 using Microsoft.Azure.WebJobs.Extensions.Http;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
+using Newtonsoft.Json.Linq;
 using Newtonsoft.Json;
 using RestEase;
 using Azure.Data.Tables;
-using Azure.Storage;
 using Azure;
-using Newtonsoft.Json.Linq;
 
 namespace YourWeatherInfo_Functions
 {
-    // We receive a JSON response, so define a class to deserialize the json into
     public class WeatherData
     {
         public Location Location { get; set; }
         public Current Current { get; set; }
-
-        /*
-        // This is deserialized using Json.NET, so use attributes as necessary
-        [JsonProperty("created_at")]
-        public DateTime CreatedAt { get; set; }
-        */
     }
     public class Location
     {
@@ -37,7 +29,6 @@ namespace YourWeatherInfo_Functions
         public string Tz_id { get; set; }
         public double Localtime_epoch { get; set; }
         public string Localtime { get; set; }
-
     }
     public class Current
     {
@@ -51,9 +42,7 @@ namespace YourWeatherInfo_Functions
     }
     public class Condition { }
 
-
     // Defined an interface representing the API
-    //[Header("User-Agent", "RestEase")]
     public interface IWeatherApi
     {
         // The [Get] attribute marks this method as a GET request
@@ -66,7 +55,6 @@ namespace YourWeatherInfo_Functions
     {
         public string PartitionKey { get; set; } = default!;
         public string RowKey { get; set; } = default!;
-
         public string WeatherRecordJson { get; set; } = default!;
         public DateTimeOffset? Timestamp { get; set; }
         public ETag ETag { get; set; }
@@ -79,42 +67,27 @@ namespace YourWeatherInfo_Functions
             [HttpTrigger(AuthorizationLevel.Anonymous, "get", "post", Route = null)] HttpRequest req,
             ILogger log)
         {
-            log.LogInformation("C# HTTP trigger function processed a request.");
-
+            log.LogInformation("C# WeatherRequest HTTP trigger function processed a request.");
+            
+            //Read Zipcode from request
             string zipcode = req.Query["zipcode"];
-
             string requestBody = await new StreamReader(req.Body).ReadToEndAsync();
             dynamic data = JsonConvert.DeserializeObject(requestBody);
-            zipcode = zipcode ?? data?.zipcode;
+            zipcode ??= data?.zipcode;
 
-            string responseMessage = string.IsNullOrEmpty(zipcode)
-                ? "This HTTP triggered function executed successfully. Pass a zipcode in the query string or in the request body for a personalized response."
-                : $"Hello, {zipcode}. This HTTP triggered function executed successfully.";
-
-            // Create an implementation of that interface
-            // We'll pass in the base URL for the API
-            IWeatherApi api = RestClient.For<IWeatherApi>("https://api.weatherapi.com");
-
-            // Now we can simply call methods on it
-            // Normally you'd await the request, but this is a console app
-            WeatherData weatherData = await api.GetWeatherDataAsync(zipcode);
-            Console.WriteLine(weatherData);
-            Console.WriteLine($"Name: {weatherData.Location.Name}. Location: {zipcode}.\n" +
-                              $"Temperature: {weatherData.Current.Temp_f}. Wind Speed: {weatherData.Current.Wind_mph} MPH. Wind Direction: {weatherData.Current.Wind_dir}.\n" +
-                              $"Cloud Coverage: {weatherData.Current.Cloud}. Humidity {weatherData.Current.Humdity}.");
-
+            //Connect to Azurite Table Storage Emulator
             string endpointProtocol = Environment.GetEnvironmentVariable("DefaultEndpointsProtocol");
             string accountName = Environment.GetEnvironmentVariable("AccountName");
             string accountKey = Environment.GetEnvironmentVariable("AccountKey");
             string tableEndpoint = Environment.GetEnvironmentVariable("TableEndpoint");
-
             string connectionString = "DefaultEndpointsProtocol=" + endpointProtocol + ";AccountName=" + accountName + ";AccountKey=" + accountKey + ";TableEndpoint=" + tableEndpoint + ";";
 
-            TableServiceClient tableServiceClient = new TableServiceClient(
+            //Connect to table client
+            TableServiceClient tableServiceClient = new(
                 connectionString
                 );
 
-            // New instance of TableClient class referencing the server-side table
+            //Connect to WeatherRecords table
             TableClient tableClient = tableServiceClient.GetTableClient(
                 tableName: "WeatherRecords"
             );
@@ -122,49 +95,61 @@ namespace YourWeatherInfo_Functions
             //Create WeatherRecords table if it does not exist
             await tableClient.CreateIfNotExistsAsync();
 
-            var weatherRecord = new WeatherRecord()
+            WeatherRecord cachedData;
+            //Read a single weather record into cachedData
+            try
+            {
+                cachedData = await tableClient.GetEntityAsync<WeatherRecord>(
+                    partitionKey: zipcode,
+                    rowKey: ""
+                );
+            }
+            catch (Exception e)
+            {
+                log.LogError("Error occured while getting cache data\n" + e);
+                WeatherRecord weatherRecord = await getWeatherRecordAsync(zipcode);
+                await tableClient.AddEntityAsync<WeatherRecord>(weatherRecord);
+                Console.WriteLine("Inserted a weather record into WeatherRecord table");
+                return new OkObjectResult(weatherRecord.WeatherRecordJson);
+            }
+
+            cachedData = await tableClient.GetEntityAsync<WeatherRecord>(
+                partitionKey: zipcode,
+                rowKey: ""
+            );
+
+            System.TimeSpan diff = DateTimeOffset.Now.Subtract((DateTimeOffset)cachedData.Timestamp);
+            Console.WriteLine(diff);
+            if (diff.TotalMinutes > 10)
+            {
+                log.LogError("Cached time is over 10 minutes time to update");
+                WeatherRecord weatherRecord = await getWeatherRecordAsync(zipcode);
+                await tableClient.UpdateEntityAsync<WeatherRecord>(weatherRecord, cachedData.ETag);
+                Console.WriteLine("Updated row at " + zipcode);
+                return new OkObjectResult(weatherRecord.WeatherRecordJson);
+            }
+            else
+            {
+                log.LogInformation("Using cachedData it's only " + diff.TotalMinutes + " minutes old");
+                return new OkObjectResult(cachedData.WeatherRecordJson);
+            }
+        }
+        public static async Task<WeatherRecord> getWeatherRecordAsync(string zipcode)
+        {
+            //Fetch and store a weather record as type WeatherData from weather API
+            IWeatherApi api = RestClient.For<IWeatherApi>("https://api.weatherapi.com");
+            WeatherData weatherData = await api.GetWeatherDataAsync(zipcode);
+            Console.WriteLine(weatherData);
+            Console.WriteLine($"Name: {weatherData.Location.Name}. Location: {zipcode}.\n" +
+                              $"Temperature: {weatherData.Current.Temp_f}. Wind Speed: {weatherData.Current.Wind_mph} MPH. Wind Direction: {weatherData.Current.Wind_dir}.\n" +
+                              $"Cloud Coverage: {weatherData.Current.Cloud}. Humidity {weatherData.Current.Humdity}.");
+
+            return new WeatherRecord()
             {
                 PartitionKey = zipcode,
                 RowKey = "",
                 WeatherRecordJson = JObject.FromObject(weatherData).ToString()
             };
-
-
-            //Read a single weather record from container
-            var cachedData = await tableClient.GetEntityAsync<WeatherRecord>(
-                partitionKey: zipcode,
-                rowKey: ""
-            );
-
-            System.TimeSpan diff = DateTimeOffset.Now.Subtract((DateTimeOffset) cachedData.Value.Timestamp);
-            Console.WriteLine(diff);
-            if (diff.TotalMinutes > 10) { 
-                log.LogError("Cached time is over 10 minutes time to update"); 
-                await tableClient.UpdateEntityAsync<WeatherRecord>(weatherRecord, cachedData.Value.ETag);
-                Console.WriteLine("Updated row at " + zipcode);
-            }
-            else { 
-                log.LogInformation("Using cachedData it's only " + diff.TotalMinutes + " minutes old"); 
-                //Get JSON back to weather data
-                return new OkObjectResult(cachedData.Value.WeatherRecordJson);
-            }
-
-            //Add weatherRecord to the table
-            try
-            {
-                await tableClient.AddEntityAsync<WeatherRecord>(weatherRecord);
-                Console.WriteLine("Inserted a weather record into WeatherRecord table");
-            }
-            catch (Exception e)
-            {
-                //Log without Exception
-                log.LogError("Exception caught while inserting weather record into WeatherRecord table" + e);
-            }
-
-            log.LogInformation("Returned cachedData timestamp: " + cachedData.Value.Timestamp.ToString());
-            log.LogInformation("Returned cachedData weatherRecord: " + cachedData.Value.WeatherRecordJson.ToString());
-
-            return new OkObjectResult(weatherData);
         }
     }
 }

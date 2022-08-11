@@ -70,7 +70,6 @@ namespace YourWeatherInfo_Functions
         public string WeatherRecordJson { get; set; } = default!;
         public DateTimeOffset? Timestamp { get; set; }
         public ETag ETag { get; set; }
-        //public WeatherData WeatherData { get; init; }
     }
 
     public static class WeatherRequest
@@ -130,12 +129,40 @@ namespace YourWeatherInfo_Functions
                 WeatherRecordJson = JObject.FromObject(weatherData).ToString()
             };
 
-            //Get JSON back to weather data
-            var WeatherJson = JObject.Parse(weatherRecord.WeatherRecordJson);
+
+            //Read a single weather record from container
+            var cachedData = await tableClient.GetEntityAsync<WeatherRecord>(
+                partitionKey: zipcode,
+                rowKey: ""
+            );
+
+            System.TimeSpan diff = DateTimeOffset.Now.Subtract((DateTimeOffset) cachedData.Value.Timestamp);
+            Console.WriteLine(diff);
+            if (diff.TotalMinutes > 10) { 
+                log.LogError("Cached time is over 10 minutes time to update"); 
+                await tableClient.UpdateEntityAsync<WeatherRecord>(weatherRecord, cachedData.Value.ETag);
+                Console.WriteLine("Updated row at " + zipcode);
+            }
+            else { 
+                log.LogInformation("Using cachedData it's only " + diff.TotalMinutes + " minutes old"); 
+                //Get JSON back to weather data
+                return new OkObjectResult(cachedData.Value.WeatherRecordJson);
+            }
 
             //Add weatherRecord to the table
-            await tableClient.AddEntityAsync<WeatherRecord>(weatherRecord);
+            try
+            {
+                await tableClient.AddEntityAsync<WeatherRecord>(weatherRecord);
+                Console.WriteLine("Inserted a weather record into WeatherRecord table");
+            }
+            catch (Exception e)
+            {
+                //Log without Exception
+                log.LogError("Exception caught while inserting weather record into WeatherRecord table" + e);
+            }
 
+            log.LogInformation("Returned cachedData timestamp: " + cachedData.Value.Timestamp.ToString());
+            log.LogInformation("Returned cachedData weatherRecord: " + cachedData.Value.WeatherRecordJson.ToString());
 
             return new OkObjectResult(weatherData);
         }

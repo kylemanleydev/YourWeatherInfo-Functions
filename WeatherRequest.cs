@@ -103,35 +103,28 @@ namespace YourWeatherInfo_Functions
                     partitionKey: zipcode,
                     rowKey: ""
                 );
+                System.TimeSpan diff = DateTimeOffset.Now.Subtract((DateTimeOffset)cachedData.Timestamp);
+                if (diff.TotalMinutes > 10)
+                {
+                    log.LogError("Cached time is over 10 minutes time to update");
+                    WeatherRecord weatherRecord = await getWeatherRecordAsync(zipcode);
+                    await tableClient.UpdateEntityAsync<WeatherRecord>(weatherRecord, cachedData.ETag);
+                    log.LogInformation("Updated row at " + zipcode);
+                    return new OkObjectResult(weatherRecord.WeatherRecordJson);
+                }
+                else
+                {
+                    log.LogInformation("Using cachedData it's only " + diff.TotalMinutes + " minutes old");
+                    return new OkObjectResult(cachedData.WeatherRecordJson);
+                }
             }
             catch (Exception e)
             {
                 log.LogError("Error occured while getting cache data\n" + e);
                 WeatherRecord weatherRecord = await getWeatherRecordAsync(zipcode);
                 await tableClient.AddEntityAsync<WeatherRecord>(weatherRecord);
-                Console.WriteLine("Inserted a weather record into WeatherRecord table");
+                log.LogInformation("Inserted a weather record into WeatherRecord table");
                 return new OkObjectResult(weatherRecord.WeatherRecordJson);
-            }
-
-            cachedData = await tableClient.GetEntityAsync<WeatherRecord>(
-                partitionKey: zipcode,
-                rowKey: ""
-            );
-
-            System.TimeSpan diff = DateTimeOffset.Now.Subtract((DateTimeOffset)cachedData.Timestamp);
-            Console.WriteLine(diff);
-            if (diff.TotalMinutes > 10)
-            {
-                log.LogError("Cached time is over 10 minutes time to update");
-                WeatherRecord weatherRecord = await getWeatherRecordAsync(zipcode);
-                await tableClient.UpdateEntityAsync<WeatherRecord>(weatherRecord, cachedData.ETag);
-                Console.WriteLine("Updated row at " + zipcode);
-                return new OkObjectResult(weatherRecord.WeatherRecordJson);
-            }
-            else
-            {
-                log.LogInformation("Using cachedData it's only " + diff.TotalMinutes + " minutes old");
-                return new OkObjectResult(cachedData.WeatherRecordJson);
             }
         }
         public static async Task<WeatherRecord> getWeatherRecordAsync(string zipcode)

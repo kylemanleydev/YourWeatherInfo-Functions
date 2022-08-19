@@ -12,7 +12,7 @@ namespace YourWeatherInfo_Functions
         public Condition Condition { get; set; }
         public double Wind_mph { get; set; }
         public string Wind_dir { get; set; }
-        public double Humdity { get; set; }
+        public double Humidity { get; set; }
         public double Cloud { get; set; }
         public double Uv { get; set; }
     }

@@ -77,7 +77,7 @@ namespace YourWeatherInfo_Functions
             Console.WriteLine(weatherData);
             Console.WriteLine($"Name: {weatherData.Location.Name}. Location: {zipcode}.\n" +
                               $"Temperature: {weatherData.Current.Temp_f}. Wind Speed: {weatherData.Current.Wind_mph} MPH. Wind Direction: {weatherData.Current.Wind_dir}.\n" +
-                              $"Cloud Coverage: {weatherData.Current.Cloud}. Humidity {weatherData.Current.Humdity}.");
+                              $"Cloud Coverage: {weatherData.Current.Cloud}. Humidity {weatherData.Current.Humidity}.");
 
             return new WeatherRecord()
             {

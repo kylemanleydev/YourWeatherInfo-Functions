@@ -4,8 +4,16 @@ Angular Weather App Functions Backend using API from https://www.weatherapi.com/
 
 ## Development server
 
+###### Using Visual Studio
 Open YourWeatherInfo-Functions.sln in Visual Studio and the Azurite Storage Emulator should launch automatically.
 Click Start Debugging and the server should be listening on `http://localhost:7071/`.
+###### Linux/CLI
+Install azurite storage emulator
+`npm install -g azurite`
+Startup the Azurite service in the provided azurite_workspace directory
+`azurite --silent --location azurite_workspace/ --debug azurite_workspace/debug.log`
+Run the azure function project using the command
+`func start`
 
 ## Local Settings
 

@@ -74,10 +74,6 @@ namespace YourWeatherInfo_Functions
             //Fetch and store a weather record as type WeatherData from weather API
             IWeatherApi api = RestClient.For<IWeatherApi>("https://api.weatherapi.com");
             WeatherData weatherData = await api.GetWeatherDataAsync(zipcode);
-            Console.WriteLine(weatherData);
-            Console.WriteLine($"Name: {weatherData.Location.Name}. Location: {zipcode}.\n" +
-                              $"Temperature: {weatherData.Current.Temp_f}. Wind Speed: {weatherData.Current.Wind_mph} MPH. Wind Direction: {weatherData.Current.Wind_dir}.\n" +
-                              $"Cloud Coverage: {weatherData.Current.Cloud}. Humidity {weatherData.Current.Humidity}.");
 
             return new WeatherRecord()
             {
